@@ -1,0 +1,166 @@
+---
+title: "Space Agency Lifespan"
+author: "Alex Doyle"
+date: "1/14/2021"
+output: html_document
+---
+
+## Tidy Tuesday mini project 
+
+### C7083 - Data Visualisation and Analytics 
+
+As part of the module run this week each student was given the task of creating a graph for presentation on Friday. The data for each student is sourced from the tidy Tuesday github page. I was assigned the `launches.csv`and `agencies.csv`from the `2019-01-15` file. 
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(hrbrthemes)
+library(stringr)
+library(plotly)
+```
+
+```{r, work directory}
+# Setting the required work directory and loading in the data 
+setwd("C:/Users/alexd/Desktop/C7083 - Data Viz/tidytuesday/Data")
+agencies <- read.csv("agencies.csv")
+
+```
+Looking at the data there is a lot to break down there are 19 different variables including the agency, the number of launches, and start date but there is also a lot of missing information such as longitude and latitude and unicode in particular. To try and make the information more the 6 most important variables are retained. These 6 were the 
+
+1. agency > the abbreviated names for the agency.
+
+2. count > the number of launches over the period of records.
+
+3. state_code > abbreviated name of the country the agency is based.
+
+4. tstart > date of first launch
+
+5. tstop > date of last recorded launch 
+
+6. agency_type > the type of agency(state run, private or start up)
+
+7. name > full name of the agency
+
+```{r selecting colums, echo=TRUE}
+agencies[17, 7] <- 1967
+agencies[17, 8] <- 1997
+
+tidy_agencies <- agencies %>%
+  select(agency, count, state_code, tstart, tstop, agency_type, name)
+```
+
+
+```{r viewing data, echo=TRUE}
+head(tidy_agencies)
+```
+
+There are over 70 different agencies recorded in this dataset to try and unclutter the data the agencies with the most launches were included. The cut off was set at 50, leaving 21 rows. The start and stop dates are formatted very different, with some including the exact date others including only the year and some having nothing at all. The year is the main factor in thise analysis so the the year every agency starts and stops. Any agencies that do not have a stop date are still currently operating do that is replaced with 2016 (the year the data was recorded) and  a new variable is created to highlight wheather or not an agency is still active.
+```{r top agencies, echo=TRUE}
+top_agencies <- tidy_agencies %>%
+  filter(count > 50)
+```
+
+```{r start/stop, echo=TRUE}
+top_agencies$start_year <- str_extract(top_agencies$tstart, "^\\d{4}")
+top_agencies$stop_year <- str_extract(top_agencies$tstop, "^\\d{4}")
+```
+
+```{r still operating, echo=TRUE}
+top_agencies<- top_agencies%>%
+  mutate_if(is.character, ~replace(., is.na(.), 2016))
+
+
+top_agencies$current <- top_agencies$stop_year
+top_agencies$current[top_agencies$stop_year < 2016] <- 0
+top_agencies$current[top_agencies$stop_year == 2016] <- 1
+```
+
+
+To organize the plot according to start year in descending order this work around had to be used to achieve the correct order. A basic ggplot is displayed  to check everything is working correctly. 
+
+```{r ordering :/, }
+top_agencies$agency <- factor(top_agencies$agency, levels = c("SPX", "ULAB", "ULAL", "FKA", "KVR", "VKSR", "ILSK", "KHRU", "SAST", "RVSNR", "BLS", "OSC", "UNKS", "AE", "ISRO", "MDSSC", "AFSC", "RVSN", "NASA", "CALT", "USAF"))
+```
+
+```{r numbering ,}
+top_agencies$start_year <- as.numeric(top_agencies$start_year)
+top_agencies$stop_year <- as.numeric(top_agencies$stop_year)
+``` 
+
+```{r ggplot , echo=TRUE}
+a<- ggplot(top_agencies) +
+  geom_point( aes(x= agency, y=start_year), color=rgb(0.2,0.7,0.1,0.5), size=3 ) +
+  geom_point( aes(x=agency, y=stop_year), color=rgb(0.7,0.2,0.1,0.5), size=3 ) +
+  geom_segment( aes(x=agency, xend = agency, y=start_year, yend=stop_year), color="black") +
+  coord_flip()+
+  theme_bw() +
+  theme(
+    legend.position = "none",
+  ) +
+  xlab("") +
+  ylab("Value of Y") +
+  scale_y_continuous()
+
+a
+```
+
+The state codes are recorded in 1 or 2 letters so to make it more understandable they are replaced with the the full title. The pop up boxes are also created with different labels for the start and stop years. Both points display the full name and the country they are based but the start points display the type of agency and the stop points detail the number of launches. 
+
+```{r decoding , echo=TRUE}
+top_agencies$state_code <- as.character(top_agencies$state_code)
+
+top_agencies$state_code[top_agencies$state_code == "US"] <- "United States" 
+top_agencies$state_code[top_agencies$state_code == "SU"] <- "Soviet Union" 
+top_agencies$state_code[top_agencies$state_code == "IN"] <- "India" 
+top_agencies$state_code[top_agencies$state_code == "F"] <- "France" 
+top_agencies$state_code[top_agencies$state_code == "RU"] <- "Russia" 
+top_agencies$state_code[top_agencies$state_code == "CN"] <- "China" 
+```
+
+```{r start_year points, echo=TRUE}
+top_agencies <- top_agencies %>%
+  mutate(mytext1=paste(
+    "Name: ", name, "\n",
+    "State code: ", state_code,"\n",
+    "Agency type: ", agency_type, sep="")) 
+```
+
+
+```{r stop_year points, echo=TRUE}
+top_agencies <- top_agencies %>%
+  mutate(mytext2=paste(
+    "Name: ", name, "\n",
+    "State code: ", state_code,"\n", 
+    "Number of Launches: ", count,  sep="")) 
+```
+
+
+The final ggplot is saved and input into the `plotly`function to out put an interactive cleveland graph. 
+
+```{r interactive ggplot, echo=TRUE}
+b<- ggplot(top_agencies) +
+  geom_segment( aes(x=agency, xend = agency, y=start_year, yend=stop_year), color="black") +
+  geom_point( aes(x= agency, y=start_year, text = mytext1), color=rgb(0.1,0.2,0.7,1), size=3 ) +
+  geom_point( aes(x=agency, y=stop_year, text = mytext2, color = current), size=3 ) +
+  coord_flip()+
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 50),
+    legend.position = "none") +
+  labs(title = "Space Agency Lifespans", 
+       x = "Agency", 
+       y = "Year",
+       caption = "Alex Doyle, Data: The Economist") +
+  scale_y_continuous()
+```
+
+
+```{r interactive plotly, echo=FALSE}
+p <- ggplotly(b, tooltip="text") 
+p
+```
+
+
+
+
+
