@@ -1,1 +1,1 @@
-tidy_tuesday
+HARUG Tidy Tuesday

@@ -1,0 +1,232 @@
+---
+title: "Astronaut Database - Tidy Tuesday Wk 29 2020"
+author: "Joe Roberts"
+date: "15/01/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## Load packages
+library(tidyverse)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(rgeos)
+library(sf)
+library(rworldmap)
+library(patchwork)
+library(Cairo)
+library(extrafont)
+library(plotly)
+```
+
+## Data background 
+This database contains publically available information about all astronauts who participated in space missions before 15 January 2020 collected from NASA and Roscosmos. The provided information includes full astronaut name, sex, date of birth, nationality, military status, a title and year of a selection program, and information about each mission completed by a particular astronaut such as a year, ascend and descend shuttle names, mission and extravehicular activity (EVAs) durations. More detail is outlined in the associated peer-reviewed publication by [Corlett, Stavnichuk and Komarova (2020)](https://doi.org/10.1016/j.lssr.2020.06.003).
+
+## Import and inspect data
+```{r cars}
+# Download data from Tidy Tuesday GitHub repository
+astronaut_data <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-07-14/astronauts.csv')
+
+# Inspect data structure
+# str(astronaut_data)
+
+# Data summary 
+# summary(astronaut_data)
+```
+
+## Exploratory data analysis
+Which countries have produced the largest number of astronauts? This is likely to be the USA and Russia, but let's confirm this:
+
+```{r}
+# Extract astronaut's country of origin from data and calculate the count 
+countries = data.frame(table(astronaut_data$nationality))
+
+# Define 'better' colnames
+colnames(countries) = c("ctry_name", "nr_of_astros")
+
+# Plot data
+ggplot(data = countries, aes(x = reorder(ctry_name, nr_of_astros), y = nr_of_astros)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal()
+```
+
+From this plot it is obvious that there are some issues with the country names. These need to be fixed:
+
+```{r}
+# Change the country expression
+countries$ctry_name = gsub("Czechoslovakia", "Slovakia", countries$ctry_name)
+countries$ctry_name = gsub("Hungry", "Hungary", countries$ctry_name)
+countries$ctry_name = gsub("Malysia", "Malaysia", countries$ctry_name)
+countries$ctry_name = gsub("Netherland", "Netherlands", countries$ctry_name)
+countries$ctry_name = gsub("U.S.S.R/Russia", "Russia", countries$ctry_name)
+countries$ctry_name = gsub("U.S.S.R/Ukraine", "Ukraine", countries$ctry_name)
+countries$ctry_name = gsub("Korea", "South Korea", countries$ctry_name)
+countries$ctry_name = gsub("Republic of South Africa", "South Africa", countries$ctry_name)
+countries$ctry_name = gsub("U.K.", "United Kingdom", countries$ctry_name)
+countries$ctry_name = gsub("U.S.", "United States of America", countries$ctry_name)
+countries$ctry_name = gsub("UAE", "United Arab Emirates", countries$ctry_name)
+
+# Filter to remove double citizenship
+countries = countries %>%
+  filter(ctry_name != "United Kingdom/United States of America")
+
+# Replot data to ensure these changes have been implemented
+ggplot(data = countries, aes(x = reorder(ctry_name, nr_of_astros), y = nr_of_astros)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal()
+```
+
+## Visualising astronaut origin using a map
+This data could be visualised with more impact on a map!
+
+```{r}
+# Data prep----
+
+# Get worldmap
+world_map <- getMap(resolution="high")
+
+# Get centroids per country polygon
+centroids <- gCentroid(world_map, byid=TRUE)
+
+# Define df with centroids including x and y coordinate
+centroid_df <- data.frame(centroids)
+
+d <- cbind(rownames(centroid_df), data.frame(centroid_df, row.names=NULL))
+colnames(d) = c("ctry_name", "x", "y")
+
+# Join df on countries
+countries_geo <- left_join(countries, d,
+                           by = "ctry_name")
+
+# Convert df to sf object
+countries_geo_sf <- sf::st_as_sf(countries_geo, coords = c("x","y")) 
+
+# Change crs
+st_crs(countries_geo_sf) = 4326
+
+
+# data visualisation----
+
+# Download country polygons
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+map <- ggplot() +
+  # Add country polygons
+  geom_sf(data = world, fill = "#FFFFFF", color = "#2A363B", size = .2) +
+  
+  # Add point centroid locations
+  geom_sf(data = countries_geo_sf, color = "black", size = 3, alpha = .5) +
+  geom_sf(data = countries_geo_sf, color = "red", size = 1, alpha = .75) +
+
+  # Add title and subtitle
+  labs(subtitle = "Astronaut's Countries of Origin\n",
+       title = "\nWHERE IN THE WORLD?") +
+  
+  # Get globe projection, set to northpole and europe
+  coord_sf(crs = "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +units=m +no_defs") +
+  
+  # Theming
+  theme_minimal() +
+  theme(plot.background = element_rect(fill = "#000000",
+                                       color ="#000000"),
+        panel.grid = element_line(color = "#FFFFFF"),
+        plot.title = element_text(colour = "#FFFFFF",
+                                  hjust = .5,
+                                  family = "Bell MT",
+                                  size = 20),
+        plot.subtitle = element_text(colour ="#FFFFFF",
+                                     hjust = .5,
+                                     family = "Verdana"),
+        panel.grid.major = element_line(size = .1))
+
+#save plot
+ggsave(map, filename = "globe.png", width = 14.8, height = 19, units = "cm", type = "cairo-png", dpi = 300)
+```
+
+## How old are astronauts on their first mission?
+
+```{r}
+library(tidyverse)
+library(extrafont)
+library(ggdark)
+library(devtools)
+library(viridis)
+
+age_astronauts <- astronaut_data %>% 
+  mutate(age_at_mission = year_of_mission - year_of_birth) %>% 
+  select(name, nationality, sex, age_at_mission, hours_mission, mission_number, year_of_mission, occupation)
+
+ggplot(age_astronauts, aes(x = year_of_mission, y = age_at_mission, colour = mission_number)) + 
+  geom_jitter(aes(alpha = 0.7)) +
+  theme_minimal() +
+  labs(title = "How old are astronauts when they go into space?") +
+  scale_y_continuous(name = "Age at mission launch") +
+  scale_color_viridis(option = "plasma") +
+  theme(plot.background = element_rect(fill = "#000000"),
+        panel.background = element_blank(),
+        panel.grid.major = element_line(color = "grey30", size = 0.2),
+        panel.grid.minor = element_line(color = "grey30", size = 0.2),
+        legend.background = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_text(color = "#C7C4C4", size = 20),
+        legend.key = element_blank(),
+        legend.title = element_text(color = "#C7C4C4", size = 16),
+        legend.text = element_text(color = "#C7C4C4", size = 16),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(color = "#C7C4C4", size=20, margin = margin(0,30,0,0)),
+        plot.title = element_text(color="#C7C4C4", size=20, face="bold",margin = margin(0,0,10,0)),
+        plot.subtitle = element_text(color = "#C7C4C4", size=12, face="bold.italic", margin = margin(0,0,30,0)),
+        plot.caption = element_text( color = "grey30", size=8),
+        plot.margin=unit(c(1,1,1.5,1.2),"cm")) +
+  scale_alpha(guide = 'none') +
+  guides(color=guide_legend(title="Mission Number")) +
+  annotate("text", x = 1985, y = 70,
+    label = "John Glenn (77)\n is the oldest person to\ntravel to space",
+    colour = "white",
+    vjust = 1,
+    size = 5
+  ) + 
+  annotate(
+    "curve",
+    xend = 1997,
+    yend = 77,
+    x = 1990,
+    y = 70,
+    curvature = -.2,
+    arrow = arrow(type = "closed", length = unit(0.40, "lines")),
+    colour = "white"
+  ) + annotate("text", x = 1980, y = 27,
+           label = "Guerman Titov and\n Valentina Tereshkova (26)\n are the youngest people to travel to space",
+           colour = "white",
+           vjust = 1,
+           size = 5
+  ) +
+  annotate(
+    "curve",
+    xend = 1961,
+    yend = 25,
+    x = 1970,
+    y = 25,
+    curvature = -.2,
+    arrow = arrow(type = "closed", length = unit(0.40, "lines")),
+    colour = "#C7C4C4"
+  ) +
+  annotate(
+    "curve",
+    xend = 1963,
+    yend = 25,
+    x = 1970,
+    y = 25,
+    curvature = -.2,
+    arrow = arrow(type = "closed", length = unit(0.40, "lines")),
+    colour = "#C7C4C4"
+  ) +
+  geom_smooth(aes(group = 1), method = "lm", formula = y ~ x, se = FALSE, colour = "grey", alpha = 0.7)
+
+ggsave("age_astronauts.png", dpi = 300, width = 11, height = 11) 
+```
+
